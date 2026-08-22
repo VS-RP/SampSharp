@@ -39,6 +39,16 @@ internal sealed class SendOrPostCallbackItem : IDisposable
 
     public void Execute()
     {
+        // Read the pool once, before the callback runs. On a Send item this field is
+        // null and the waiting caller owns the return, but Set() below releases that
+        // caller, which can return the item, let another thread take it out of the pool
+        // and re-arm it with a non-null _pool, all while this frame is still on its way
+        // to the finally. Returning to *that* pool would push a live, queued item back
+        // into the pool and Reset() its callback out from under the pump, which then
+        // dequeues it and throws a NullReferenceException whose only frame is this
+        // method. Capturing first keeps this frame consistent with the item it ran.
+        var pool = _pool;
+
         try
         {
             if (_executionType == ExecutionType.Send)
@@ -63,7 +73,7 @@ internal sealed class SendOrPostCallbackItem : IDisposable
         }
         finally
         {
-            _pool?.Return(this);
+            pool?.Return(this);
         }
     }
 }
